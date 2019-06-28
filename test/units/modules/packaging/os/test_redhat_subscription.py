@@ -7,11 +7,11 @@ __metaclass__ = type
 from units.compat.mock import call, patch
 from ansible.modules.packaging.os import redhat_subscription
 
-from units.modules.utils import (AnsibleExitJson, ModuleTestCase)
+from units.modules.utils import (AnsibleExitJson, ModuleTestCase, set_module_args)
 
 
 class RedHatSubscriptionModuleTestCase(ModuleTestCase):
-    module = rhsm_release
+    module = redhat_subscription
 
     def setUp(self):
         super(RedHatSubscriptionModuleTestCase, self).setUp()
@@ -22,6 +22,7 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
         self.mock_run_command = patch('ansible.modules.packaging.os.rhsm_release.'
                                       'AnsibleModule.run_command')
         self.module_main_command = self.mock_run_command.start()
+        self.module_main_command.return_value = [0, "", ""]
 
         # Module does a get_bin_path check before every run_command call
         self.mock_get_bin_path = patch('ansible.modules.packaging.os.rhsm_release.'
@@ -39,21 +40,21 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
             self.module.main()
         return exc.exception.args[0]
 
-    def test_register_username_password_org(self):
+    def test_already_registered_system(self):
         """
-        Test registration using username, admin and org without auto-attach
+        Test what happens, when the system is already registered
         """
         set_module_args(
-        	{
-        	'state': 'present'
-        	'username': 'admin',
-        	'password': 'admin',
-        	'org_id': 'admin'
-        	})
+            {
+                'state': 'present',
+                'username': 'admin',
+                'password': 'admin',
+                'org_id': 'admin'
+            })
 
         result = self.module_main(AnsibleExitJson)
 
-        self.assertTrue(result['changed'])
+        self.assertFalse(result['changed'])
         self.module_main_command.assert_has_calls([
-            call('/testbin/subscription-manager register --username admin --password admin --org admin', check_rc=True),
+            call(['/testbin/subscription-manager', 'identity'], check_rc=False),
         ])
