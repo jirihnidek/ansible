@@ -22,7 +22,6 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
         self.mock_run_command = patch('ansible.modules.packaging.os.rhsm_release.'
                                       'AnsibleModule.run_command')
         self.module_main_command = self.mock_run_command.start()
-        self.module_main_command.return_value = [0, "", ""]
 
         # Module does a get_bin_path check before every run_command call
         self.mock_get_bin_path = patch('ansible.modules.packaging.os.rhsm_release.'
@@ -51,6 +50,37 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
                 'password': 'admin',
                 'org_id': 'admin'
             })
+        self.module_main_command.side_effect = [
+            # first call "identity" returns 0. It means that system is regisetred.
+            (0, '', ''),
+        ]
+
+        result = self.module_main(AnsibleExitJson)
+
+        self.assertFalse(result['changed'])
+        self.module_main_command.assert_has_calls([
+            call(['/testbin/subscription-manager', 'identity'], check_rc=False),
+        ])
+
+    def test_registeration_of_system(self):
+        """
+        Test registration using username and password
+        """
+        set_module_args(
+            {
+                'state': 'present',
+                'username': 'admin',
+                'password': 'admin',
+                'org_id': 'admin'
+            })
+        self.module_main_command.side_effect = [
+            # first call "identity" returns 1. It means that system is not regisetred.
+            (1, 'This system is not yet registered.', ''),
+            # second call, register: just needs to exit with 0 rc
+            (0, '', ''),
+        ]
+        # TODO: mock /etc/yum.repos.d/redhat.repo, because subscription-manager wants
+        # to write to this file.
 
         result = self.module_main(AnsibleExitJson)
 
