@@ -29,8 +29,11 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
         self.get_bin_path = self.mock_get_bin_path.start()
         self.get_bin_path.return_value = '/testbin/subscription-manager'
 
-        mocker.patch.object(redhat_subscription.RegistrationBase, 'REDHAT_REPO')
-        mock_isfile = mocker.patch('os.path.isfile', return_value=True)
+        self.mock_redhat_repo = patch(redhat_subscription.RegistrationBase, 'REDHAT_REPO')
+        self.redhat_repo = self.mock_redhat_repo.start()
+
+        self.mock_is_file = patch('os.path.isfile', return_value=True)
+        self.is_file = self.mock_is_file.start()
 
     def tearDown(self):
         self.mock_run_command.stop()
