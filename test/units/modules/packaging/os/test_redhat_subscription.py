@@ -30,6 +30,9 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
         self.get_bin_path = self.mock_get_bin_path.start()
         self.get_bin_path.return_value = '/testbin/subscription-manager'
 
+        mocker.patch.object(redhat_subscription.RegistrationBase, 'REDHAT_REPO')
+        mock_isfile = mocker.patch('os.path.isfile', return_value=True)
+
     def tearDown(self):
         self.mock_run_command.stop()
         self.mock_get_bin_path.stop()
@@ -51,6 +54,12 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
                 'password': 'admin',
                 'org_id': 'admin'
             })
+        self.module_main_command.side_effect = [
+            # first call "identity" returns 1. It means that system is not regisetred.
+            (1, 'This system is not yet registered.', ''),
+            # second call, register: just needs to exit with 0 rc
+            (0, '', ''),
+        ]
 
         result = self.module_main(AnsibleExitJson)
 
