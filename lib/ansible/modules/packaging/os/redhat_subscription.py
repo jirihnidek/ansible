@@ -756,8 +756,10 @@ def main():
                               server_proxy_hostname, server_proxy_port, server_proxy_user, server_proxy_password, release)
                 if pool_ids:
                     subscribed_pool_ids = rhsm.subscribe_by_pool_ids(pool_ids)
-                else:
+                elif pool != '^$':
                     subscribed_pool_ids = rhsm.subscribe(pool)
+                else:
+                    subscribed_pool_ids = []
             except Exception as e:
                 module.fail_json(msg="Failed to register with '%s': %s" % (server_hostname, to_native(e)))
             else:

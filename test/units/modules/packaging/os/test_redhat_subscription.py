@@ -85,19 +85,13 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
                 'org_id': 'admin'
             })
         self.module_main_command.side_effect = [
-            # first call: "identity" returns 1. It means that system is not regisetred.
+            # First call: "identity" returns 1. It means that system is not registered.
             (1, 'This system is not yet registered.', ''),
-            # second call: config
+            # Second call: "config" server hostname
             (0, '', ''),
-            # third call: register
-            (0, '', ''),
-            # 4th call: list --available
-            (0, '', ''),
-            # 5th call: list --available
+            # Third call: "register"
             (0, '', ''),
         ]
-        # TODO: mock /etc/yum.repos.d/redhat.repo, because subscription-manager wants
-        # to write to this file.
 
         result = self.module_main(AnsibleExitJson)
 
@@ -122,11 +116,6 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
                     '--org', 'admin',
                     '--username', 'admin',
                     '--password', 'admin'
-                ], check_rc=True, expand_user_and_vars=False),
-            call('subscription-manager list --available', check_rc=True,
-                 environ_update={'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}),
-            # TODO: try to remove this call (duplicity)
-            call('subscription-manager list --available', check_rc=True,
-                 environ_update={'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'})
+                ], check_rc=True, expand_user_and_vars=False)
         ])
 
