@@ -85,13 +85,15 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
                 'org_id': 'admin'
             })
         self.module_main_command.side_effect = [
-            # first call "identity" returns 1. It means that system is not regisetred.
+            # first call: "identity" returns 1. It means that system is not regisetred.
             (1, 'This system is not yet registered.', ''),
-            # second call, register: just needs to exit with 0 rc
+            # second call: config
             (0, '', ''),
-            # other calls?
+            # third call: register
             (0, '', ''),
+            # 4th call: list --available
             (0, '', ''),
+            # 5th call: list --available
             (0, '', ''),
         ]
         # TODO: mock /etc/yum.repos.d/redhat.repo, because subscription-manager wants
@@ -123,6 +125,7 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
                 ], check_rc=True, expand_user_and_vars=False),
             call('subscription-manager list --available', check_rc=True,
                  environ_update={'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}),
+            # TODO: try to remove this call (duplicity)
             call('subscription-manager list --available', check_rc=True,
                  environ_update={'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'})
         ])
