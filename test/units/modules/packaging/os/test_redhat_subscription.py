@@ -19,21 +19,24 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
         # Mainly interested that the subscription-manager calls are right
         # based on the module args, so patch out run_command in the module.
         # returns (rc, out, err) structure
-        self.mock_run_command = patch('ansible.modules.packaging.os.rhsm_release.'
+        self.mock_run_command = patch('ansible.modules.packaging.os.redhat_subscription.'
                                       'AnsibleModule.run_command')
         self.module_main_command = self.mock_run_command.start()
 
         # Module does a get_bin_path check before every run_command call
-        self.mock_get_bin_path = patch('ansible.modules.packaging.os.rhsm_release.'
+        self.mock_get_bin_path = patch('ansible.modules.packaging.os.redhat_subscription.'
                                        'AnsibleModule.get_bin_path')
         self.get_bin_path = self.mock_get_bin_path.start()
         self.get_bin_path.return_value = '/testbin/subscription-manager'
 
-        self.mock_redhat_repo = patch(redhat_subscription.RegistrationBase, 'REDHAT_REPO')
+        self.mock_redhat_repo = patch('ansible.modules.packaging.os.redhat_subscription.RegistrationBase.REDHAT_REPO')
         self.redhat_repo = self.mock_redhat_repo.start()
 
-        self.mock_is_file = patch('os.path.isfile', return_value=True)
+        self.mock_is_file = patch('os.path.isfile', return_value=False)
         self.is_file = self.mock_is_file.start()
+
+        self.mock_unlink = patch('os.unlink', return_value=True)
+        self.unlink = self.mock_unlink.start()
 
     def tearDown(self):
         self.mock_run_command.stop()
@@ -52,6 +55,7 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
         set_module_args(
             {
                 'state': 'present',
+                'server_hostname': 'subscription.rhsm.redhat.com',
                 'username': 'admin',
                 'password': 'admin',
                 'org_id': 'admin'
@@ -75,6 +79,7 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
         set_module_args(
             {
                 'state': 'present',
+                'server_hostname': 'subscription.rhsm.redhat.com',
                 'username': 'admin',
                 'password': 'admin',
                 'org_id': 'admin'
@@ -84,13 +89,41 @@ class RedHatSubscriptionModuleTestCase(ModuleTestCase):
             (1, 'This system is not yet registered.', ''),
             # second call, register: just needs to exit with 0 rc
             (0, '', ''),
+            # other calls?
+            (0, '', ''),
+            (0, '', ''),
+            (0, '', ''),
         ]
         # TODO: mock /etc/yum.repos.d/redhat.repo, because subscription-manager wants
         # to write to this file.
 
         result = self.module_main(AnsibleExitJson)
 
-        self.assertFalse(result['changed'])
+        self.assertTrue(result['changed'])
         self.module_main_command.assert_has_calls([
-            call(['/testbin/subscription-manager', 'identity'], check_rc=False),
+            call(
+                [
+                    '/testbin/subscription-manager',
+                    'identity'
+                ],check_rc=False),
+            call(
+                [
+                    '/testbin/subscription-manager',
+                    'config',
+                    '--server.hostname=subscription.rhsm.redhat.com'
+                ], check_rc=True),
+            call(
+                [
+                    '/testbin/subscription-manager',
+                    'register',
+                    '--serverurl', 'subscription.rhsm.redhat.com',
+                    '--org', 'admin',
+                    '--username', 'admin',
+                    '--password', 'admin'
+                ], check_rc=True, expand_user_and_vars=False),
+            call('subscription-manager list --available', check_rc=True,
+                 environ_update={'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}),
+            call('subscription-manager list --available', check_rc=True,
+                 environ_update={'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'})
         ])
+
