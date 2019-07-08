@@ -644,6 +644,33 @@ class RhsmPools(object):
                 yield product
 
 
+class SysPurpose(object):
+    """
+    This class is used for reading and writing to syspurpose.json file
+    """
+
+    SYSPURPOSE_FILE_PATH = "/etc/rhsm/syspurpose/syspurpose.json"
+
+    def __init__(self, path=None):
+        """
+        Initialize class used for reading syspurpose json file
+        """
+        self.path = path or self.SYSPURPOSE_FILE_PATH
+
+    def write_syspurpose(self, sypurpose):
+        """
+        This function tries to update current syspurpose attributes to
+        json file.
+        """
+        pass
+
+    def read_syspurpose(self):
+        """
+        Read current syspurpuse from json file
+        """
+        return {}
+
+
 def main():
 
     # Load RHSM configuration from file
@@ -696,7 +723,27 @@ def main():
             server_proxy_password=dict(default=None,
                                        required=False,
                                        no_log=True),
-            release=dict(default=None, required=False)
+            release=dict(default=None, required=False),
+            syspurpose=dict(
+                default=None,
+                required=False,
+                type=dict,
+                options=dict(
+                    role=dict(type='str',
+                        required=False,
+                        default=None),
+                    usage=dict(type='str',
+                        required=False,
+                        default=None),
+                    service_level_agreement=dict(type='str',
+                        required=False,
+                        default=None),
+                    addons=dict(type='str',
+                        required=False,
+                        default=None),
+                    sync=dict(type='bool',
+                        required=False,
+                        default='no')))
         ),
         required_together=[['username', 'password'],
                            ['server_proxy_hostname', 'server_proxy_port'],
@@ -745,6 +792,7 @@ def main():
     server_proxy_user = module.params['server_proxy_user']
     server_proxy_password = module.params['server_proxy_password']
     release = module.params['release']
+    syspurpose = module.params['syspurpose']
 
     global SUBMAN_CMD
     SUBMAN_CMD = module.get_bin_path('subscription-manager', True)
