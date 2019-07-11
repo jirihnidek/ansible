@@ -190,8 +190,631 @@ TEST_CASES = [
             'changed': True,
             'msg': "System successfully registered to 'satellite.company.com'."
         }
-    ]
+    ],
+    # Test of registration using username and password with auto-attach option
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'auto_attach': 'true'
+        },
+        {
+            'id': 'test_registeration_username_password_auto_attach',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--org', 'admin',
+                        '--auto-attach',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test of force registration despite the system is already registered
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'force_register': 'true'
+        },
+        {
+            'id': 'test_force_registeration_username_password',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (0, 'This system already registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--force',
+                        '--org', 'admin',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test of registration using username, password and proxy options
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'force_register': 'true',
+            'server_proxy_hostname': 'proxy.company.com',
+            'server_proxy_port': '12345',
+            'server_proxy_user': 'proxy_user',
+            'server_proxy_password': 'secret_proxy_password'
+        },
+        {
+            'id': 'test_registeration_username_password_proxy_options',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (0, 'This system already registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'config',
+                        '--server.proxy_hostname=proxy.company.com',
+                        '--server.proxy_password=secret_proxy_password',
+                        '--server.proxy_port=12345',
+                        '--server.proxy_user=proxy_user'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--force',
+                        '--org', 'admin',
+                        '--proxy', 'proxy.company.com:12345',
+                        '--proxyuser', 'proxy_user',
+                        '--proxypassword', 'secret_proxy_password',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test of registration using username and password and attach to pool
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'pool': 'ff8080816b8e967f016b8e99632804a6'
+        },
+        {
+            'id': 'test_registeration_username_password_pool',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--org', 'admin',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        'subscription-manager list --available',
+                        {'check_rc': True, 'environ_update': {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}},
+                        (0,
+                         '''
++-------------------------------------------+
+    Available Subscriptions
++-------------------------------------------+
+Subscription Name:   SP Server Premium (S: Premium, U: Production, R: SP Server)
+Provides:            SP Server Bits
+SKU:                 sp-server-prem-prod
+Contract:            0
+Pool ID:             ff8080816b8e967f016b8e99632804a6
+Provides Management: Yes
+Available:           5
+Suggested:           1
+Service Type:        L1-L3
+Roles:               SP Server
+Service Level:       Premium
+Usage:               Production
+Add-ons:
+Subscription Type:   Standard
+Starts:              06/25/19
+Ends:                06/24/20
+Entitlement Type:    Physical
+''', ''),
+                    ]
+                ),
+                (
+                    'subscription-manager attach --pool ff8080816b8e967f016b8e99632804a6',
+                    {'check_rc': True},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test of registration using username and password and attach to pool ID and quantities
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'pool_ids': [{'ff8080816b8e967f016b8e99632804a6': 2}, {'ff8080816b8e967f016b8e99747107e9': 4}]
+        },
+        {
+            'id': 'test_registeration_username_password_pool_ids_quantities',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--org', 'admin',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        'subscription-manager list --available',
+                        {'check_rc': True, 'environ_update': {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}},
+                        (0,
+                         '''
++-------------------------------------------+
+    Available Subscriptions
++-------------------------------------------+
+Subscription Name:   SP Smart Management (A: ADDON1)
+Provides:            SP Addon 1 bits
+SKU:                 sp-with-addon-1
+Contract:            1
+Pool ID:             ff8080816b8e967f016b8e99747107e9
+Provides Management: Yes
+Available:           10
+Suggested:           1
+Service Type:
+Roles:
+Service Level:
+Usage:
+Add-ons:             ADDON1
+Subscription Type:   Standard
+Starts:              25.6.2019
+Ends:                24.6.2020
+Entitlement Type:    Physical
+
+Subscription Name:   SP Server Premium (S: Premium, U: Production, R: SP Server)
+Provides:            SP Server Bits
+SKU:                 sp-server-prem-prod
+Contract:            0
+Pool ID:             ff8080816b8e967f016b8e99632804a6
+Provides Management: Yes
+Available:           5
+Suggested:           1
+Service Type:        L1-L3
+Roles:               SP Server
+Service Level:       Premium
+Usage:               Production
+Add-ons:
+Subscription Type:   Standard
+Starts:              06/25/19
+Ends:                06/24/20
+Entitlement Type:    Physical
+''', '')
+                    ]
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99632804a6',
+                        '--quantity', '2'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99747107e9',
+                        '--quantity', '4'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test of registration using username and password and attach to pool ID without quantities
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'pool_ids': ['ff8080816b8e967f016b8e99632804a6', 'ff8080816b8e967f016b8e99747107e9']
+        },
+        {
+            'id': 'test_registeration_username_password_pool_ids',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--org', 'admin',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        'subscription-manager list --available',
+                        {'check_rc': True, 'environ_update': {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}},
+                        (0,
+                         '''
++-------------------------------------------+
+    Available Subscriptions
++-------------------------------------------+
+Subscription Name:   SP Smart Management (A: ADDON1)
+Provides:            SP Addon 1 bits
+SKU:                 sp-with-addon-1
+Contract:            1
+Pool ID:             ff8080816b8e967f016b8e99747107e9
+Provides Management: Yes
+Available:           10
+Suggested:           1
+Service Type:
+Roles:
+Service Level:
+Usage:
+Add-ons:             ADDON1
+Subscription Type:   Standard
+Starts:              25.6.2019
+Ends:                24.6.2020
+Entitlement Type:    Physical
+
+Subscription Name:   SP Server Premium (S: Premium, U: Production, R: SP Server)
+Provides:            SP Server Bits
+SKU:                 sp-server-prem-prod
+Contract:            0
+Pool ID:             ff8080816b8e967f016b8e99632804a6
+Provides Management: Yes
+Available:           5
+Suggested:           1
+Service Type:        L1-L3
+Roles:               SP Server
+Service Level:       Premium
+Usage:               Production
+Add-ons:
+Subscription Type:   Standard
+Starts:              06/25/19
+Ends:                06/24/20
+Entitlement Type:    Physical
+''', '')
+                    ]
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99632804a6',
+                        '--quantity', '1'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99747107e9',
+                        '--quantity', '1'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test of registration using username and password and attach to pool ID (one pool)
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'pool_ids': ['ff8080816b8e967f016b8e99632804a6']
+        },
+        {
+            'id': 'test_registeration_username_password_one_pool_id',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--org', 'admin',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        'subscription-manager list --available',
+                        {'check_rc': True, 'environ_update': {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}},
+                        (0,
+                         '''
++-------------------------------------------+
+    Available Subscriptions
++-------------------------------------------+
+Subscription Name:   SP Smart Management (A: ADDON1)
+Provides:            SP Addon 1 bits
+SKU:                 sp-with-addon-1
+Contract:            1
+Pool ID:             ff8080816b8e967f016b8e99747107e9
+Provides Management: Yes
+Available:           10
+Suggested:           1
+Service Type:
+Roles:
+Service Level:
+Usage:
+Add-ons:             ADDON1
+Subscription Type:   Standard
+Starts:              25.6.2019
+Ends:                24.6.2020
+Entitlement Type:    Physical
+
+Subscription Name:   SP Server Premium (S: Premium, U: Production, R: SP Server)
+Provides:            SP Server Bits
+SKU:                 sp-server-prem-prod
+Contract:            0
+Pool ID:             ff8080816b8e967f016b8e99632804a6
+Provides Management: Yes
+Available:           5
+Suggested:           1
+Service Type:        L1-L3
+Roles:               SP Server
+Service Level:       Premium
+Usage:               Production
+Add-ons:
+Subscription Type:   Standard
+Starts:              06/25/19
+Ends:                06/24/20
+Entitlement Type:    Physical
+''', '')
+                    ]
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99632804a6',
+                        '--quantity', '1'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test attaching different set of pool IDs
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'pool_ids': [{'ff8080816b8e967f016b8e99632804a6': 2}, {'ff8080816b8e967f016b8e99747107e9': 4}]
+        },
+        {
+            'id': 'test_attaching_different_pool_ids',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (0, 'system identity: b26df632-25ed-4452-8f89-0308bfd167cb', ''),
+                ),
+                (
+                    'subscription-manager list --consumed',
+                    {'check_rc': True, 'environ_update': {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}},
+                    (0, '''
++-------------------------------------------+
+   Consumed Subscriptions
++-------------------------------------------+
+Subscription Name:   Multi-Attribute Stackable (4 cores, no content)
+Provides:            Multi-Attribute Limited Product (no content)
+SKU:                 cores4-multiattr
+Contract:            1
+Account:             12331131231
+Serial:              7807912223970164816
+Pool ID:             ff8080816b8e967f016b8e995f5103b5
+Provides Management: No
+Active:              True
+Quantity Used:       1
+Service Type:        Level 3
+Roles:
+Service Level:       Premium
+Usage:
+Add-ons:
+Status Details:      Subscription is current
+Subscription Type:   Stackable
+Starts:              06/25/19
+Ends:                06/24/20
+Entitlement Type:    Physical
+''', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'unsubscribe',
+                        '--serial=7807912223970164816',
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        'subscription-manager list --available',
+                        {'check_rc': True, 'environ_update': {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}},
+                        (0,
+                         '''
++-------------------------------------------+
+    Available Subscriptions
++-------------------------------------------+
+Subscription Name:   SP Smart Management (A: ADDON1)
+Provides:            SP Addon 1 bits
+SKU:                 sp-with-addon-1
+Contract:            1
+Pool ID:             ff8080816b8e967f016b8e99747107e9
+Provides Management: Yes
+Available:           10
+Suggested:           1
+Service Type:
+Roles:
+Service Level:
+Usage:
+Add-ons:             ADDON1
+Subscription Type:   Standard
+Starts:              25.6.2019
+Ends:                24.6.2020
+Entitlement Type:    Physical
+
+Subscription Name:   SP Server Premium (S: Premium, U: Production, R: SP Server)
+Provides:            SP Server Bits
+SKU:                 sp-server-prem-prod
+Contract:            0
+Pool ID:             ff8080816b8e967f016b8e99632804a6
+Provides Management: Yes
+Available:           5
+Suggested:           1
+Service Type:        L1-L3
+Roles:               SP Server
+Service Level:       Premium
+Usage:               Production
+Add-ons:
+Subscription Type:   Standard
+Starts:              06/25/19
+Ends:                06/24/20
+Entitlement Type:    Physical
+
+Subscription Name:   Multi-Attribute Stackable (4 cores, no content)
+Provides:            Multi-Attribute Limited Product (no content)
+SKU:                 cores4-multiattr
+Contract:            1
+Pool ID:             ff8080816b8e967f016b8e995f5103b5
+Provides Management: No
+Available:           10
+Suggested:           1
+Service Type:        Level 3
+Roles:
+Service Level:       Premium
+Usage:
+Add-ons:
+Subscription Type:   Stackable
+Starts:              11.7.2019
+Ends:                10.7.2020
+Entitlement Type:    Physical
+''', '')
+                    ]
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99632804a6',
+                        '--quantity', '2'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99747107e9',
+                        '--quantity', '4'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+        }
+    ],
 ]
+
 
 TEST_CASES_IDS = [item[1]['id'] for item in TEST_CASES]
 
@@ -219,7 +842,8 @@ def test_redhat_subscribtion(mocker, capfd, patch_redhat_subscription, testcase)
 
     assert 'changed' in results
     assert results['changed'] == testcase['changed']
-    assert results['msg'] == testcase['msg']
+    if 'msg' in results:
+        assert results['msg'] == testcase['msg']
 
     assert basic.AnsibleModule.run_command.call_count == len(testcase['run_command.calls'])
     if basic.AnsibleModule.run_command.call_count:
