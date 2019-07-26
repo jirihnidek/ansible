@@ -13,6 +13,9 @@ from ansible.modules.packaging.os import redhat_subscription
 
 import pytest
 
+import os
+import tempfile
+
 TESTED_MODULE = redhat_subscription.__name__
 
 
@@ -22,8 +25,8 @@ def patch_redhat_subscription(mocker):
     Function used for mocking some parts of redhat_subscribtion module
     """
     mocker.patch('ansible.modules.packaging.os.redhat_subscription.RegistrationBase.REDHAT_REPO')
-    mocker.patch('os.path.isfile', return_value=False)
-    mocker.patch('os.unlink', return_value=True)
+    mocker.patch('ansible.modules.packaging.os.redhat_subscription.isfile', return_value=False)
+    mocker.patch('ansible.modules.packaging.os.redhat_subscription.unlink', return_value=True)
     mocker.patch('ansible.modules.packaging.os.redhat_subscription.AnsibleModule.get_bin_path',
                  return_value='/testbin/subscription-manager')
 
@@ -812,7 +815,7 @@ Entitlement Type:    Physical
             ],
             'changed': True,
         }
-    ],
+    ]
 ]
 
 
@@ -839,6 +842,158 @@ def test_redhat_subscribtion(mocker, capfd, patch_redhat_subscription, testcase)
 
     out, err = capfd.readouterr()
     results = json.loads(out)
+
+    assert 'changed' in results
+    assert results['changed'] == testcase['changed']
+    if 'msg' in results:
+        assert results['msg'] == testcase['msg']
+
+    assert basic.AnsibleModule.run_command.call_count == len(testcase['run_command.calls'])
+    if basic.AnsibleModule.run_command.call_count:
+        call_args_list = [(item[0][0], item[1]) for item in basic.AnsibleModule.run_command.call_args_list]
+        expected_call_args_list = [(item[0], item[1]) for item in testcase['run_command.calls']]
+        assert call_args_list == expected_call_args_list
+
+
+SYSPURPOSE_TEST_CASES = [
+    # Test setting syspurpose attributes (system is already registered)
+    # and synchronization with candlepin server
+    [
+        {
+            'state': 'present',
+            'server_hostname': 'subscription.rhsm.redhat.com',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'syspurpose': {
+                'role': 'AwesomeOS',
+                'usage': 'Production',
+                'service_level_agreement': 'Premium',
+                'addons': ['ADDON1', 'ADDON2'],
+                'sync': True
+            }
+        },
+        {
+            'id': 'test_setting_syspurpose_attributes',
+            'syspurpose': {
+                'role': 'AwesomeOS',
+                'usage': 'Production',
+                'service_level_agreement': 'Premium',
+                'addons': ['ADDON1', 'ADDON2'],
+                'sync': True
+            },
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (0, 'system identity: b26df632-25ed-4452-8f89-0308bfd167cb', '')
+                ),
+#                 (
+#                     ['/testbin/subscription-manager', 'status'],
+#                     {'check_rc', False},
+#                     (0, '''
+# +-------------------------------------------+
+#    System Status Details
+# +-------------------------------------------+
+# Overall Status: Current
+
+# System Purpose Status: Matched
+# ''', '')
+#                 )
+            ],
+            'changed': False,
+            'msg': 'System already registered.'
+        }
+    ],
+    # Test of registration using username and password with auto-attach option, when
+    # syspurpose attributes are set
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'auto_attach': 'true',
+            'syspurpose': {
+                'role': 'AwesomeOS',
+                'usage': 'Testing',
+                'service_level_agreement': 'Super',
+                'addons': ['ADDON1',],
+                'sync': False
+            }
+        },
+        {
+            'id': 'test_registeration_username_password_auto_attach_syspurpose',
+            'syspurpose': {
+                'role': 'AwesomeOS',
+                'usage': 'Testing',
+                'service_level_agreement': 'Super',
+                'addons': ['ADDON1',],
+                'sync': False
+            },
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--org', 'admin',
+                        '--auto-attach',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+]
+
+
+SYSPURPOSE_TEST_CASES_IDS = [item[1]['id'] for item in SYSPURPOSE_TEST_CASES]
+
+
+@pytest.mark.parametrize('patch_ansible_module, testcase', SYSPURPOSE_TEST_CASES, ids=SYSPURPOSE_TEST_CASES_IDS, indirect=['patch_ansible_module'])
+@pytest.mark.usefixtures('patch_ansible_module')
+def test_redhat_syspurpose(mocker, capfd, patch_redhat_subscription, testcase, tmpdir):
+    """
+    Run unit tests for test cases listen in TEST_CASES
+    """
+
+    # Mock function used for running commands first
+    call_results = [item[2] for item in testcase['run_command.calls']]
+    mock_run_command = mocker.patch.object(
+        basic.AnsibleModule,
+        'run_command',
+        side_effect=call_results)
+
+    tmp_syspurposefile = tmpdir.mkdir("syspurpose").join("syspurpose.json")
+
+    mocker.patch(
+        'ansible.modules.packaging.os.redhat_subscription.SysPurpose.SYSPURPOSE_FILE_PATH',
+        return_value=tmp_syspurposefile
+        )
+
+    # Try to run test case
+    with pytest.raises(SystemExit):
+        redhat_subscription.main()
+
+    out, err = capfd.readouterr()
+    results = json.loads(out)
+
+    # TODO: test content of syspurpose.json and compare it with testcase['syspurpose']
+    tmp_syspurposefile.read()
+
+    # Remove temporary dir
+    os.unlink(tmp_syspurposefile)
+    os.rmdir(tmp_dir_path)
 
     assert 'changed' in results
     assert results['changed'] == testcase['changed']

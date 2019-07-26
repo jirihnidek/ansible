@@ -213,7 +213,8 @@ subscribed_pool_ids:
     }
 '''
 
-import os
+from os.path import isfile
+from os import unlink
 import re
 import shutil
 import tempfile
@@ -240,8 +241,8 @@ class RegistrationBase(object):
 
     def enable(self):
         # Remove any existing redhat.repo
-        if os.path.isfile(self.REDHAT_REPO):
-            os.unlink(self.REDHAT_REPO)
+        if isfile(self.REDHAT_REPO):
+            unlink(self.REDHAT_REPO)
 
     def register(self):
         raise NotImplementedError("Must be implemented by a sub-class")
@@ -255,7 +256,7 @@ class RegistrationBase(object):
     def update_plugin_conf(self, plugin, enabled=True):
         plugin_conf = '/etc/yum/pluginconf.d/%s.conf' % plugin
 
-        if os.path.isfile(plugin_conf):
+        if isfile(plugin_conf):
             tmpfd, tmpfile = tempfile.mkstemp()
             shutil.copy2(plugin_conf, tmpfile)
             cfg = configparser.ConfigParser()
@@ -657,7 +658,7 @@ class SysPurpose(object):
         """
         self.path = path or self.SYSPURPOSE_FILE_PATH
 
-    def write_syspurpose(self, sypurpose):
+    def write_syspurpose(self, syspurpose):
         """
         This function tries to update current syspurpose attributes to
         json file.
@@ -666,7 +667,7 @@ class SysPurpose(object):
 
     def read_syspurpose(self):
         """
-        Read current syspurpuse from json file
+        Read current syspurpuse from json file.
         """
         return {}
 
