@@ -7,7 +7,6 @@ __metaclass__ = type
 
 import json
 
-# from units.compat.mock import call, patch
 from ansible.module_utils import basic
 from ansible.modules.packaging.os import redhat_subscription
 
@@ -875,13 +874,7 @@ SYSPURPOSE_TEST_CASES = [
         },
         {
             'id': 'test_setting_syspurpose_attributes',
-            'syspurpose': {
-                'role': 'AwesomeOS',
-                'usage': 'Production',
-                'service_level_agreement': 'Premium',
-                'addons': ['ADDON1', 'ADDON2'],
-                'sync': True
-            },
+            'existing_syspurpose': None,
             'run_command.calls': [
                 (
                     ['/testbin/subscription-manager', 'identity'],
@@ -900,6 +893,50 @@ SYSPURPOSE_TEST_CASES = [
 # System Purpose Status: Matched
 # ''', '')
 #                 )
+            ],
+            'changed': False,
+            'msg': 'System already registered.'
+        }
+    ],
+    # Test setting syspurpose attributes (system is already registered)
+    # without synchronization with candlepin server. Some syspurpose attributes were set
+    # in the past
+    [
+        {
+            'state': 'present',
+            'server_hostname': 'subscription.rhsm.redhat.com',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'syspurpose': {
+                'role': 'AwesomeOS',
+                'service_level_agreement': 'Premium',
+                'addons': ['ADDON1', 'ADDON2'],
+                'sync': False
+            }
+        },
+        {
+            'id': 'test_changing_syspurpose_attributes',
+            'existing_syspurpose': {
+                'role': 'CoolOS',
+                'usage': 'Production',
+                'service_level_agreement': 'Super',
+                'addons': [],
+                'foo': 'bar'
+            },
+            'expected_syspurpose': {
+                'role': 'AwesomeOS',
+                'usage': 'Production',
+                'service_level_agreement': 'Premium',
+                'addons': ['ADDON1', 'ADDON2'],
+                'foo': 'bar'
+            },
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (0, 'system identity: b26df632-25ed-4452-8f89-0308bfd167cb', '')
+                ),
             ],
             'changed': False,
             'msg': 'System already registered.'
@@ -924,13 +961,7 @@ SYSPURPOSE_TEST_CASES = [
         },
         {
             'id': 'test_registeration_username_password_auto_attach_syspurpose',
-            'syspurpose': {
-                'role': 'AwesomeOS',
-                'usage': 'Testing',
-                'service_level_agreement': 'Super',
-                'addons': ['ADDON1',],
-                'sync': False
-            },
+            'existing_syspurpose': None,
             'run_command.calls': [
                 (
                     ['/testbin/subscription-manager', 'identity'],
@@ -962,7 +993,7 @@ SYSPURPOSE_TEST_CASES_IDS = [item[1]['id'] for item in SYSPURPOSE_TEST_CASES]
 
 @pytest.mark.parametrize('patch_ansible_module, testcase', SYSPURPOSE_TEST_CASES, ids=SYSPURPOSE_TEST_CASES_IDS, indirect=['patch_ansible_module'])
 @pytest.mark.usefixtures('patch_ansible_module')
-def test_redhat_syspurpose(mocker, capfd, patch_redhat_subscription, testcase, tmpdir):
+def test_redhat_syspurpose(mocker, capfd, patch_redhat_subscription, patch_ansible_module, testcase, tmpdir):
     """
     Run unit tests for test cases listen in TEST_CASES
     """
@@ -975,6 +1006,12 @@ def test_redhat_syspurpose(mocker, capfd, patch_redhat_subscription, testcase, t
         side_effect=call_results)
 
     tmp_syspurposefile = tmpdir.mkdir("syspurpose").join("syspurpose.json")
+    if testcase['existing_syspurpose'] is not None:
+        tmp_syspurposefile.write(json.dumps(testcase['existing_syspurpose']))
+        # When existing_syspurpose is set, then expected_syspurpose has to be set too
+        assert 'expected_syspurpose' in testcase
+    else:
+        tmp_syspurposefile.write("")
 
     mocker.patch(
         'ansible.modules.packaging.os.redhat_subscription.SysPurpose.SYSPURPOSE_FILE_PATH',
@@ -989,11 +1026,8 @@ def test_redhat_syspurpose(mocker, capfd, patch_redhat_subscription, testcase, t
     results = json.loads(out)
 
     # TODO: test content of syspurpose.json and compare it with testcase['syspurpose']
-    tmp_syspurposefile.read()
-
-    # Remove temporary dir
-    os.unlink(tmp_syspurposefile)
-    os.rmdir(tmp_dir_path)
+    print(patch_ansible_module['ANSIBLE_MODULE_ARGS']['syspurpose'])
+    tmp_syspurposefile.read_text("utf-8")
 
     assert 'changed' in results
     assert results['changed'] == testcase['changed']
