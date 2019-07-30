@@ -27,4 +27,4 @@ def patch_ansible_module(request, mocker):
 
     mocker.patch('ansible.module_utils.basic._ANSIBLE_ARGS', to_bytes(args))
 
-    return request.param
+    # return request.param

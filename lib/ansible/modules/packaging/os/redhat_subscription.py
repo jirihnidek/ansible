@@ -201,6 +201,21 @@ EXAMPLES = '''
     username: joe_user
     password: somepass
     release: 7.4
+
+- name: Register as user (joe_user) with password (somepass), set syspurpose attributes and sychronize them with server
+  redhat_subscription:
+    state: present
+    username: joe_user
+    password: somepass
+    auto_attach: true
+    syspurpose:
+      usage: "Production"
+      role: "Red Hat Enterprise Server"
+      service_level_agreement: "Premium"
+      addons:
+        - addon1
+        - addon2
+      sync: true
 '''
 
 RETURN = '''
@@ -218,6 +233,7 @@ from os import unlink
 import re
 import shutil
 import tempfile
+import json
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils._text import to_native
@@ -551,6 +567,14 @@ class Rhsm(RegistrationBase):
                 'unsubscribed_serials': serials}
 
 
+    def sync_syspurpose(self):
+        """
+        Try to synchronize syspurpose attributes with server
+        """
+        args = [SUBMAN_CMD, 'status']
+        rc, stdout, stderr = self.module.run_command(args, check_rc=False)
+
+
 class RhsmPool(object):
     '''
         Convenience class for housing subscription information
@@ -652,24 +676,62 @@ class SysPurpose(object):
 
     SYSPURPOSE_FILE_PATH = "/etc/rhsm/syspurpose/syspurpose.json"
 
+    ALLOWED_ATTRIBUTES = ['role', 'usage', 'service_level_agreement', 'addons']
+
     def __init__(self, path=None):
         """
         Initialize class used for reading syspurpose json file
         """
         self.path = path or self.SYSPURPOSE_FILE_PATH
 
-    def write_syspurpose(self, syspurpose):
+    def update_syspurpose(self, new_syspurpose):
         """
-        This function tries to update current syspurpose attributes to
+        Try to update current syspurpose with new attributes from new_syspurpose
+        """
+        syspurpose = {}
+        syspurpose_changed = False
+        for key, value in new_syspurpose.items():
+            if key in self.ALLOWED_ATTRIBUTES:
+                syspurpose[key] = value
+            elif key == 'sync':
+                pass
+            else:
+                raise KeyError("Atribute: %s not in list of allowed attributes: %s" % 
+                    (key, self.ALLOWED_ATTRIBUTES))
+        current_syspurpose = self._read_syspurpose()
+        if current_syspurpose != syspurpose:
+            syspurpose_changed = True
+        # Update current syspurpose with new values
+        current_syspurpose.update(syspurpose)
+        # When some key is not listed in new syspurpose, then delete it from current syspurpose
+        # and ignore custom attributes created by user (e.g. "foo": "bar")
+        for key in list(current_syspurpose):
+            if key in self.ALLOWED_ATTRIBUTES and key not in syspurpose:
+                del current_syspurpose[key]
+        self._write_syspurpose(current_syspurpose)
+        return syspurpose_changed
+
+    def _write_syspurpose(self, new_syspurpose):
+        """
+        This function tries to update current new_syspurpose attributes to
         json file.
         """
-        pass
+        with open(self.path, "w") as fp:
+            fp.write(json.dumps(new_syspurpose, indent=2, ensure_ascii=False, sort_keys=True))
 
-    def read_syspurpose(self):
+    def _read_syspurpose(self):
         """
         Read current syspurpuse from json file.
         """
-        return {}
+        current_syspurpose = {}
+        try:
+            with open(self.path, "r") as fp:
+                content = fp.read()
+        except IOError:
+            pass
+        else:
+            current_syspurpose = json.loads(content)
+        return current_syspurpose
 
 
 def main():
@@ -730,6 +792,7 @@ def main():
                 required=False,
                 type=dict,
                 options=dict(
+                    default={},
                     role=dict(type='str',
                         required=False,
                         default=None),
@@ -739,7 +802,7 @@ def main():
                     service_level_agreement=dict(type='str',
                         required=False,
                         default=None),
-                    addons=dict(type='str',
+                    addons=dict(type='list',
                         required=False,
                         default=None),
                     sync=dict(type='bool',
@@ -798,11 +861,23 @@ def main():
     global SUBMAN_CMD
     SUBMAN_CMD = module.get_bin_path('subscription-manager', True)
 
+    syspurpose_changed = False
+    if syspurpose is not None:
+        try:
+            syspurpose_changed = SysPurpose().update_syspurpose(syspurpose)
+        except Exception as err:
+            module.fail_json(msg="Failed to update syspurpose attributes: %s" % to_native(err))
+
     # Ensure system is registered
     if state == 'present':
 
         # Register system
         if rhsm.is_registered and not force_register:
+            if syspurpose and 'sync' in syspurpose and syspurpose['sync'] is True:
+                try:
+                    rhsm.sync_syspurpose()
+                except Exception as e:
+                    module.fail_json(msg="Failed to synchronize syspurpose attributes: %s" % to_native(e))
             if pool != '^$' or pool_ids:
                 try:
                     if pool_ids:
@@ -814,7 +889,10 @@ def main():
                 else:
                     module.exit_json(**result)
             else:
-                module.exit_json(changed=False, msg="System already registered.")
+                if syspurpose_changed is True:
+                    module.exit_json(changed=True, msg="Syspurpose attributes changed.")
+                else:
+                    module.exit_json(changed=False, msg="System already registered.")
         else:
             try:
                 rhsm.enable()
@@ -823,6 +901,8 @@ def main():
                               consumer_type, consumer_name, consumer_id, force_register,
                               environment, rhsm_baseurl, server_insecure, server_hostname,
                               server_proxy_hostname, server_proxy_port, server_proxy_user, server_proxy_password, release)
+                if syspurpose and 'sync' in syspurpose and syspurpose['sync'] is True:
+                    rhsm.sync_syspurpose()
                 if pool_ids:
                     subscribed_pool_ids = rhsm.subscribe_by_pool_ids(pool_ids)
                 elif pool != '^$':
@@ -835,6 +915,7 @@ def main():
                 module.exit_json(changed=True,
                                  msg="System successfully registered to '%s'." % server_hostname,
                                  subscribed_pool_ids=subscribed_pool_ids)
+
     # Ensure system is *not* registered
     if state == 'absent':
         if not rhsm.is_registered:

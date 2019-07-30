@@ -874,28 +874,107 @@ SYSPURPOSE_TEST_CASES = [
         },
         {
             'id': 'test_setting_syspurpose_attributes',
-            'existing_syspurpose': None,
+            'existing_syspurpose': {},
+            'expected_syspurpose': {
+                'role': 'AwesomeOS',
+                'usage': 'Production',
+                'service_level_agreement': 'Premium',
+                'addons': ['ADDON1', 'ADDON2'],
+            },
             'run_command.calls': [
                 (
                     ['/testbin/subscription-manager', 'identity'],
                     {'check_rc': False},
                     (0, 'system identity: b26df632-25ed-4452-8f89-0308bfd167cb', '')
                 ),
-#                 (
-#                     ['/testbin/subscription-manager', 'status'],
-#                     {'check_rc', False},
-#                     (0, '''
-# +-------------------------------------------+
-#    System Status Details
-# +-------------------------------------------+
-# Overall Status: Current
+                (
+                    ['/testbin/subscription-manager', 'status'],
+                    {'check_rc': False},
+                    (0, '''
++-------------------------------------------+
+   System Status Details
++-------------------------------------------+
+Overall Status: Current
 
-# System Purpose Status: Matched
-# ''', '')
-#                 )
+System Purpose Status: Matched
+''', '')
+                )
             ],
-            'changed': False,
-            'msg': 'System already registered.'
+            'changed': True,
+            'msg': 'Syspurpose attributes changed.'
+        }
+    ],
+    # Test setting unspupported attributes
+    [
+        {
+            'state': 'present',
+            'server_hostname': 'subscription.rhsm.redhat.com',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'syspurpose': {
+                'foo': 'Bar',
+                'role': 'AwesomeOS',
+                'usage': 'Production',
+                'service_level_agreement': 'Premium',
+                'addons': ['ADDON1', 'ADDON2'],
+                'sync': True
+            }
+        },
+        {
+            'id': 'test_setting_syspurpose_wrong_attributes',
+            'existing_syspurpose': {},
+            'expected_syspurpose': {},
+            'run_command.calls': [],
+            'failed': True
+        }
+    ],
+    # Test setting addons not a list
+    [
+        {
+            'state': 'present',
+            'server_hostname': 'subscription.rhsm.redhat.com',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'syspurpose': {
+                'role': 'AwesomeOS',
+                'usage': 'Production',
+                'service_level_agreement': 'Premium',
+                'addons': 'ADDON1',
+                'sync': True
+            }
+        },
+        {
+            'id': 'test_setting_syspurpose_addons_not_list',
+            'existing_syspurpose': {},
+            'expected_syspurpose': {
+                'role': 'AwesomeOS',
+                'usage': 'Production',
+                'service_level_agreement': 'Premium',
+                'addons': 'ADDON1'
+            },
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (0, 'system identity: b26df632-25ed-4452-8f89-0308bfd167cb', '')
+                ),
+                (
+                    ['/testbin/subscription-manager', 'status'],
+                    {'check_rc': False},
+                    (0, '''
++-------------------------------------------+
+   System Status Details
++-------------------------------------------+
+Overall Status: Current
+
+System Purpose Status: Matched
+''', '')
+                )
+            ],
+            'changed': True,
+            'msg': 'Syspurpose attributes changed.'
         }
     ],
     # Test setting syspurpose attributes (system is already registered)
@@ -926,10 +1005,49 @@ SYSPURPOSE_TEST_CASES = [
             },
             'expected_syspurpose': {
                 'role': 'AwesomeOS',
-                'usage': 'Production',
                 'service_level_agreement': 'Premium',
                 'addons': ['ADDON1', 'ADDON2'],
                 'foo': 'bar'
+            },
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (0, 'system identity: b26df632-25ed-4452-8f89-0308bfd167cb', '')
+                ),
+            ],
+            'changed': True,
+            'msg': 'Syspurpose attributes changed.'
+        }
+    ],
+    # Test trying to set syspurpose attributes (system is already registered)
+    # without synchronization with candlepin server. Some syspurpose attributes were set
+    # in the past. Syspurpose attributes are same as before
+    [
+        {
+            'state': 'present',
+            'server_hostname': 'subscription.rhsm.redhat.com',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'syspurpose': {
+                'role': 'AwesomeOS',
+                'service_level_agreement': 'Premium',
+                'addons': ['ADDON1', 'ADDON2'],
+                'sync': False
+            }
+        },
+        {
+            'id': 'test_not_changing_syspurpose_attributes',
+            'existing_syspurpose': {
+                'role': 'AwesomeOS',
+                'service_level_agreement': 'Premium',
+                'addons': ['ADDON1', 'ADDON2'],
+            },
+            'expected_syspurpose': {
+                'role': 'AwesomeOS',
+                'service_level_agreement': 'Premium',
+                'addons': ['ADDON1', 'ADDON2'],
             },
             'run_command.calls': [
                 (
@@ -957,11 +1075,17 @@ SYSPURPOSE_TEST_CASES = [
                 'service_level_agreement': 'Super',
                 'addons': ['ADDON1',],
                 'sync': False
-            }
+            },
         },
         {
             'id': 'test_registeration_username_password_auto_attach_syspurpose',
             'existing_syspurpose': None,
+            'expected_syspurpose': {
+                'role': 'AwesomeOS',
+                'usage': 'Testing',
+                'service_level_agreement': 'Super',
+                'addons': ['ADDON1',],
+            },
             'run_command.calls': [
                 (
                     ['/testbin/subscription-manager', 'identity'],
@@ -985,6 +1109,68 @@ SYSPURPOSE_TEST_CASES = [
             'msg': "System successfully registered to 'None'."
         }
     ],
+    # Test of registration using username and password with auto-attach option, when
+    # syspurpose attributes are set. Syspurpose attributes are also synchronized
+    # in this case
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'auto_attach': 'true',
+            'syspurpose': {
+                'role': 'AwesomeOS',
+                'usage': 'Testing',
+                'service_level_agreement': 'Super',
+                'addons': ['ADDON1',],
+                'sync': True
+            },
+        },
+        {
+            'id': 'test_registeration_username_password_auto_attach_syspurpose_sync',
+            'existing_syspurpose': None,
+            'expected_syspurpose': {
+                'role': 'AwesomeOS',
+                'usage': 'Testing',
+                'service_level_agreement': 'Super',
+                'addons': ['ADDON1',],
+            },
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--org', 'admin',
+                        '--auto-attach',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                ),
+                (
+                    ['/testbin/subscription-manager', 'status'],
+                    {'check_rc': False},
+                    (0, '''
++-------------------------------------------+
+   System Status Details
++-------------------------------------------+
+Overall Status: Current
+
+System Purpose Status: Matched
+''', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
 ]
 
 
@@ -993,9 +1179,9 @@ SYSPURPOSE_TEST_CASES_IDS = [item[1]['id'] for item in SYSPURPOSE_TEST_CASES]
 
 @pytest.mark.parametrize('patch_ansible_module, testcase', SYSPURPOSE_TEST_CASES, ids=SYSPURPOSE_TEST_CASES_IDS, indirect=['patch_ansible_module'])
 @pytest.mark.usefixtures('patch_ansible_module')
-def test_redhat_syspurpose(mocker, capfd, patch_redhat_subscription, patch_ansible_module, testcase, tmpdir):
+def test_redhat_subscribtion_syspurpose(mocker, capfd, patch_redhat_subscription, patch_ansible_module, testcase, tmpdir):
     """
-    Run unit tests for test cases listen in TEST_CASES
+    Run unit tests for test cases listen in SYSPURPOSE_TEST_CASES (syspurpose specific cases)
     """
 
     # Mock function used for running commands first
@@ -1005,18 +1191,15 @@ def test_redhat_syspurpose(mocker, capfd, patch_redhat_subscription, patch_ansib
         'run_command',
         side_effect=call_results)
 
-    tmp_syspurposefile = tmpdir.mkdir("syspurpose").join("syspurpose.json")
+    mock_syspurpose_file = tmpdir.mkdir("syspurpose").join("syspurpose.json")
+    # When there there are some existing syspurpose attributes specified, then
+    # write them to the file first
     if testcase['existing_syspurpose'] is not None:
-        tmp_syspurposefile.write(json.dumps(testcase['existing_syspurpose']))
-        # When existing_syspurpose is set, then expected_syspurpose has to be set too
-        assert 'expected_syspurpose' in testcase
+        mock_syspurpose_file.write(json.dumps(testcase['existing_syspurpose']))
     else:
-        tmp_syspurposefile.write("")
+        mock_syspurpose_file.write("{}")
 
-    mocker.patch(
-        'ansible.modules.packaging.os.redhat_subscription.SysPurpose.SYSPURPOSE_FILE_PATH',
-        return_value=tmp_syspurposefile
-        )
+    redhat_subscription.SysPurpose.SYSPURPOSE_FILE_PATH = str(mock_syspurpose_file)
 
     # Try to run test case
     with pytest.raises(SystemExit):
@@ -1025,14 +1208,17 @@ def test_redhat_syspurpose(mocker, capfd, patch_redhat_subscription, patch_ansib
     out, err = capfd.readouterr()
     results = json.loads(out)
 
-    # TODO: test content of syspurpose.json and compare it with testcase['syspurpose']
-    print(patch_ansible_module['ANSIBLE_MODULE_ARGS']['syspurpose'])
-    tmp_syspurposefile.read_text("utf-8")
+    if 'failed' in testcase:
+        assert results['failed'] == testcase['failed']
+    else:
+        assert 'changed' in results
+        assert results['changed'] == testcase['changed']
+        if 'msg' in results:
+            assert results['msg'] == testcase['msg']
 
-    assert 'changed' in results
-    assert results['changed'] == testcase['changed']
-    if 'msg' in results:
-        assert results['msg'] == testcase['msg']
+    mock_file_content = mock_syspurpose_file.read_text("utf-8")
+    current_syspurpose = json.loads(mock_file_content)
+    assert current_syspurpose == testcase['expected_syspurpose']
 
     assert basic.AnsibleModule.run_command.call_count == len(testcase['run_command.calls'])
     if basic.AnsibleModule.run_command.call_count:
