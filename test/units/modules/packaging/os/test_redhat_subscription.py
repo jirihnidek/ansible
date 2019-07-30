@@ -1,121 +1,851 @@
-# (c) 2018, Sean Myers <sean.myers@redhat.com>
+# Author: Jiri Hnidek (jhnidek@redhat.com)
+#
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
-from units.compat.mock import call, patch
+import json
+
+from ansible.module_utils import basic
 from ansible.modules.packaging.os import redhat_subscription
 
-from units.modules.utils import (AnsibleExitJson, ModuleTestCase, set_module_args)
+import pytest
+
+TESTED_MODULE = redhat_subscription.__name__
 
 
-class RedHatSubscriptionModuleTestCase(ModuleTestCase):
-    module = redhat_subscription
+@pytest.fixture
+def patch_redhat_subscription(mocker):
+    """
+    Function used for mocking some parts of redhat_subscribtion module
+    """
+    mocker.patch('ansible.modules.packaging.os.redhat_subscription.RegistrationBase.REDHAT_REPO')
+    mocker.patch('os.path.isfile', return_value=False)
+    mocker.patch('os.unlink', return_value=True)
+    mocker.patch('ansible.modules.packaging.os.redhat_subscription.AnsibleModule.get_bin_path',
+                 return_value='/testbin/subscription-manager')
 
-    def setUp(self):
-        super(RedHatSubscriptionModuleTestCase, self).setUp()
 
-        # Mainly interested that the subscription-manager calls are right
-        # based on the module args, so patch out run_command in the module.
-        # returns (rc, out, err) structure
-        self.mock_run_command = patch('ansible.modules.packaging.os.redhat_subscription.'
-                                      'AnsibleModule.run_command')
-        self.module_main_command = self.mock_run_command.start()
+@pytest.mark.parametrize('patch_ansible_module', [{}], indirect=['patch_ansible_module'])
+@pytest.mark.usefixtures('patch_ansible_module')
+def test_without_required_parameters(capfd, patch_redhat_subscription):
+    """
+    Failure must occurs when all parameters are missing
+    """
+    with pytest.raises(SystemExit):
+        redhat_subscription.main()
+    out, err = capfd.readouterr()
+    results = json.loads(out)
+    assert results['failed']
+    assert 'state is present but any of the following are missing' in results['msg']
 
-        # Module does a get_bin_path check before every run_command call
-        self.mock_get_bin_path = patch('ansible.modules.packaging.os.redhat_subscription.'
-                                       'AnsibleModule.get_bin_path')
-        self.get_bin_path = self.mock_get_bin_path.start()
-        self.get_bin_path.return_value = '/testbin/subscription-manager'
 
-        self.mock_redhat_repo = patch('ansible.modules.packaging.os.redhat_subscription.RegistrationBase.REDHAT_REPO')
-        self.redhat_repo = self.mock_redhat_repo.start()
+TEST_CASES = [
+    # Test the case, when the system is already registered
+    [
+        {
+            'state': 'present',
+            'server_hostname': 'subscription.rhsm.redhat.com',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin'
+        },
+        {
+            'id': 'test_already_registered_system',
+            'run_command.calls': [
+                (
+                    # Calling of following command will be asserted
+                    ['/testbin/subscription-manager', 'identity'],
+                    # Was return code checked?
+                    {'check_rc': False},
+                    # Mock of returned code, stdout and stderr
+                    (0, 'system identity: b26df632-25ed-4452-8f89-0308bfd167cb', '')
+                )
+            ],
+            'changed': False,
+            'msg': 'System already registered.'
+        }
+    ],
+    # Test simple registration using username and password
+    [
+        {
+            'state': 'present',
+            'server_hostname': 'satellite.company.com',
+            'username': 'admin',
+            'password': 'admin',
+        },
+        {
+            'id': 'test_registeration_username_password',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, '', '')
+                ),
+                (
+                    ['/testbin/subscription-manager', 'config', '--server.hostname=satellite.company.com'],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    ['/testbin/subscription-manager', 'register',
+                        '--serverurl', 'satellite.company.com',
+                        '--username', 'admin',
+                        '--password', 'admin'],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'satellite.company.com'."
+        }
+    ],
+    # Test unregistration, when system is unregistered
+    [
+        {
+            'state': 'absent',
+            'server_hostname': 'subscription.rhsm.redhat.com',
+            'username': 'admin',
+            'password': 'admin',
+        },
+        {
+            'id': 'test_unregisteration',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (0, 'system identity: b26df632-25ed-4452-8f89-0308bfd167cb', '')
+                ),
+                (
+                    ['/testbin/subscription-manager', 'unsubscribe', '--all'],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    ['/testbin/subscription-manager', 'unregister'],
+                    {'check_rc': True},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully unregistered from subscription.rhsm.redhat.com."
+        }
+    ],
+    # Test unregistration of already unregistered system
+    [
+        {
+            'state': 'absent',
+            'server_hostname': 'subscription.rhsm.redhat.com',
+            'username': 'admin',
+            'password': 'admin',
+        },
+        {
+            'id': 'test_unregisteration_of_unregistered_system',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                )
+            ],
+            'changed': False,
+            'msg': "System already unregistered."
+        }
+    ],
+    # Test registration using activation key
+    [
+        {
+            'state': 'present',
+            'server_hostname': 'satellite.company.com',
+            'activationkey': 'some-activation-key',
+            'org_id': 'admin'
+        },
+        {
+            'id': 'test_registeration_activation_key',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    ['/testbin/subscription-manager', 'config', '--server.hostname=satellite.company.com'],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--serverurl', 'satellite.company.com',
+                        '--org', 'admin',
+                        '--activationkey', 'some-activation-key'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'satellite.company.com'."
+        }
+    ],
+    # Test of registration using username and password with auto-attach option
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'auto_attach': 'true'
+        },
+        {
+            'id': 'test_registeration_username_password_auto_attach',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--org', 'admin',
+                        '--auto-attach',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test of force registration despite the system is already registered
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'force_register': 'true'
+        },
+        {
+            'id': 'test_force_registeration_username_password',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (0, 'This system already registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--force',
+                        '--org', 'admin',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test of registration using username, password and proxy options
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'force_register': 'true',
+            'server_proxy_hostname': 'proxy.company.com',
+            'server_proxy_port': '12345',
+            'server_proxy_user': 'proxy_user',
+            'server_proxy_password': 'secret_proxy_password'
+        },
+        {
+            'id': 'test_registeration_username_password_proxy_options',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (0, 'This system already registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'config',
+                        '--server.proxy_hostname=proxy.company.com',
+                        '--server.proxy_password=secret_proxy_password',
+                        '--server.proxy_port=12345',
+                        '--server.proxy_user=proxy_user'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--force',
+                        '--org', 'admin',
+                        '--proxy', 'proxy.company.com:12345',
+                        '--proxyuser', 'proxy_user',
+                        '--proxypassword', 'secret_proxy_password',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test of registration using username and password and attach to pool
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'pool': 'ff8080816b8e967f016b8e99632804a6'
+        },
+        {
+            'id': 'test_registeration_username_password_pool',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--org', 'admin',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        'subscription-manager list --available',
+                        {'check_rc': True, 'environ_update': {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}},
+                        (0,
+                         '''
++-------------------------------------------+
+    Available Subscriptions
++-------------------------------------------+
+Subscription Name:   SP Server Premium (S: Premium, U: Production, R: SP Server)
+Provides:            SP Server Bits
+SKU:                 sp-server-prem-prod
+Contract:            0
+Pool ID:             ff8080816b8e967f016b8e99632804a6
+Provides Management: Yes
+Available:           5
+Suggested:           1
+Service Type:        L1-L3
+Roles:               SP Server
+Service Level:       Premium
+Usage:               Production
+Add-ons:
+Subscription Type:   Standard
+Starts:              06/25/19
+Ends:                06/24/20
+Entitlement Type:    Physical
+''', ''),
+                    ]
+                ),
+                (
+                    'subscription-manager attach --pool ff8080816b8e967f016b8e99632804a6',
+                    {'check_rc': True},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test of registration using username and password and attach to pool ID and quantities
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'pool_ids': [{'ff8080816b8e967f016b8e99632804a6': 2}, {'ff8080816b8e967f016b8e99747107e9': 4}]
+        },
+        {
+            'id': 'test_registeration_username_password_pool_ids_quantities',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--org', 'admin',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        'subscription-manager list --available',
+                        {'check_rc': True, 'environ_update': {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}},
+                        (0,
+                         '''
++-------------------------------------------+
+    Available Subscriptions
++-------------------------------------------+
+Subscription Name:   SP Smart Management (A: ADDON1)
+Provides:            SP Addon 1 bits
+SKU:                 sp-with-addon-1
+Contract:            1
+Pool ID:             ff8080816b8e967f016b8e99747107e9
+Provides Management: Yes
+Available:           10
+Suggested:           1
+Service Type:
+Roles:
+Service Level:
+Usage:
+Add-ons:             ADDON1
+Subscription Type:   Standard
+Starts:              25.6.2019
+Ends:                24.6.2020
+Entitlement Type:    Physical
 
-        self.mock_is_file = patch('os.path.isfile', return_value=False)
-        self.is_file = self.mock_is_file.start()
+Subscription Name:   SP Server Premium (S: Premium, U: Production, R: SP Server)
+Provides:            SP Server Bits
+SKU:                 sp-server-prem-prod
+Contract:            0
+Pool ID:             ff8080816b8e967f016b8e99632804a6
+Provides Management: Yes
+Available:           5
+Suggested:           1
+Service Type:        L1-L3
+Roles:               SP Server
+Service Level:       Premium
+Usage:               Production
+Add-ons:
+Subscription Type:   Standard
+Starts:              06/25/19
+Ends:                06/24/20
+Entitlement Type:    Physical
+''', '')
+                    ]
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99632804a6',
+                        '--quantity', '2'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99747107e9',
+                        '--quantity', '4'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test of registration using username and password and attach to pool ID without quantities
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'pool_ids': ['ff8080816b8e967f016b8e99632804a6', 'ff8080816b8e967f016b8e99747107e9']
+        },
+        {
+            'id': 'test_registeration_username_password_pool_ids',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--org', 'admin',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        'subscription-manager list --available',
+                        {'check_rc': True, 'environ_update': {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}},
+                        (0,
+                         '''
++-------------------------------------------+
+    Available Subscriptions
++-------------------------------------------+
+Subscription Name:   SP Smart Management (A: ADDON1)
+Provides:            SP Addon 1 bits
+SKU:                 sp-with-addon-1
+Contract:            1
+Pool ID:             ff8080816b8e967f016b8e99747107e9
+Provides Management: Yes
+Available:           10
+Suggested:           1
+Service Type:
+Roles:
+Service Level:
+Usage:
+Add-ons:             ADDON1
+Subscription Type:   Standard
+Starts:              25.6.2019
+Ends:                24.6.2020
+Entitlement Type:    Physical
 
-        self.mock_unlink = patch('os.unlink', return_value=True)
-        self.unlink = self.mock_unlink.start()
+Subscription Name:   SP Server Premium (S: Premium, U: Production, R: SP Server)
+Provides:            SP Server Bits
+SKU:                 sp-server-prem-prod
+Contract:            0
+Pool ID:             ff8080816b8e967f016b8e99632804a6
+Provides Management: Yes
+Available:           5
+Suggested:           1
+Service Type:        L1-L3
+Roles:               SP Server
+Service Level:       Premium
+Usage:               Production
+Add-ons:
+Subscription Type:   Standard
+Starts:              06/25/19
+Ends:                06/24/20
+Entitlement Type:    Physical
+''', '')
+                    ]
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99632804a6',
+                        '--quantity', '1'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99747107e9',
+                        '--quantity', '1'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test of registration using username and password and attach to pool ID (one pool)
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'pool_ids': ['ff8080816b8e967f016b8e99632804a6']
+        },
+        {
+            'id': 'test_registeration_username_password_one_pool_id',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (1, 'This system is not yet registered.', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'register',
+                        '--org', 'admin',
+                        '--username', 'admin',
+                        '--password', 'admin'
+                    ],
+                    {'check_rc': True, 'expand_user_and_vars': False},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        'subscription-manager list --available',
+                        {'check_rc': True, 'environ_update': {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}},
+                        (0,
+                         '''
++-------------------------------------------+
+    Available Subscriptions
++-------------------------------------------+
+Subscription Name:   SP Smart Management (A: ADDON1)
+Provides:            SP Addon 1 bits
+SKU:                 sp-with-addon-1
+Contract:            1
+Pool ID:             ff8080816b8e967f016b8e99747107e9
+Provides Management: Yes
+Available:           10
+Suggested:           1
+Service Type:
+Roles:
+Service Level:
+Usage:
+Add-ons:             ADDON1
+Subscription Type:   Standard
+Starts:              25.6.2019
+Ends:                24.6.2020
+Entitlement Type:    Physical
 
-    def tearDown(self):
-        self.mock_run_command.stop()
-        self.mock_get_bin_path.stop()
-        super(RedHatSubscriptionModuleTestCase, self).tearDown()
+Subscription Name:   SP Server Premium (S: Premium, U: Production, R: SP Server)
+Provides:            SP Server Bits
+SKU:                 sp-server-prem-prod
+Contract:            0
+Pool ID:             ff8080816b8e967f016b8e99632804a6
+Provides Management: Yes
+Available:           5
+Suggested:           1
+Service Type:        L1-L3
+Roles:               SP Server
+Service Level:       Premium
+Usage:               Production
+Add-ons:
+Subscription Type:   Standard
+Starts:              06/25/19
+Ends:                06/24/20
+Entitlement Type:    Physical
+''', '')
+                    ]
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99632804a6',
+                        '--quantity', '1'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+            'msg': "System successfully registered to 'None'."
+        }
+    ],
+    # Test attaching different set of pool IDs
+    [
+        {
+            'state': 'present',
+            'username': 'admin',
+            'password': 'admin',
+            'org_id': 'admin',
+            'pool_ids': [{'ff8080816b8e967f016b8e99632804a6': 2}, {'ff8080816b8e967f016b8e99747107e9': 4}]
+        },
+        {
+            'id': 'test_attaching_different_pool_ids',
+            'run_command.calls': [
+                (
+                    ['/testbin/subscription-manager', 'identity'],
+                    {'check_rc': False},
+                    (0, 'system identity: b26df632-25ed-4452-8f89-0308bfd167cb', ''),
+                ),
+                (
+                    'subscription-manager list --consumed',
+                    {'check_rc': True, 'environ_update': {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}},
+                    (0, '''
++-------------------------------------------+
+   Consumed Subscriptions
++-------------------------------------------+
+Subscription Name:   Multi-Attribute Stackable (4 cores, no content)
+Provides:            Multi-Attribute Limited Product (no content)
+SKU:                 cores4-multiattr
+Contract:            1
+Account:             12331131231
+Serial:              7807912223970164816
+Pool ID:             ff8080816b8e967f016b8e995f5103b5
+Provides Management: No
+Active:              True
+Quantity Used:       1
+Service Type:        Level 3
+Roles:
+Service Level:       Premium
+Usage:
+Add-ons:
+Status Details:      Subscription is current
+Subscription Type:   Stackable
+Starts:              06/25/19
+Ends:                06/24/20
+Entitlement Type:    Physical
+''', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'unsubscribe',
+                        '--serial=7807912223970164816',
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        'subscription-manager list --available',
+                        {'check_rc': True, 'environ_update': {'LANG': 'C', 'LC_ALL': 'C', 'LC_MESSAGES': 'C'}},
+                        (0,
+                         '''
++-------------------------------------------+
+    Available Subscriptions
++-------------------------------------------+
+Subscription Name:   SP Smart Management (A: ADDON1)
+Provides:            SP Addon 1 bits
+SKU:                 sp-with-addon-1
+Contract:            1
+Pool ID:             ff8080816b8e967f016b8e99747107e9
+Provides Management: Yes
+Available:           10
+Suggested:           1
+Service Type:
+Roles:
+Service Level:
+Usage:
+Add-ons:             ADDON1
+Subscription Type:   Standard
+Starts:              25.6.2019
+Ends:                24.6.2020
+Entitlement Type:    Physical
 
-    def module_main(self, exit_exc):
-        with self.assertRaises(exit_exc) as exc:
-            self.module.main()
-        return exc.exception.args[0]
+Subscription Name:   SP Server Premium (S: Premium, U: Production, R: SP Server)
+Provides:            SP Server Bits
+SKU:                 sp-server-prem-prod
+Contract:            0
+Pool ID:             ff8080816b8e967f016b8e99632804a6
+Provides Management: Yes
+Available:           5
+Suggested:           1
+Service Type:        L1-L3
+Roles:               SP Server
+Service Level:       Premium
+Usage:               Production
+Add-ons:
+Subscription Type:   Standard
+Starts:              06/25/19
+Ends:                06/24/20
+Entitlement Type:    Physical
 
-    def test_already_registered_system(self):
-        """
-        Test what happens, when the system is already registered
-        """
-        set_module_args(
-            {
-                'state': 'present',
-                'server_hostname': 'subscription.rhsm.redhat.com',
-                'username': 'admin',
-                'password': 'admin',
-                'org_id': 'admin'
-            })
-        self.module_main_command.side_effect = [
-            # first call "identity" returns 0. It means that system is regisetred.
-            (0, '', ''),
-        ]
+Subscription Name:   Multi-Attribute Stackable (4 cores, no content)
+Provides:            Multi-Attribute Limited Product (no content)
+SKU:                 cores4-multiattr
+Contract:            1
+Pool ID:             ff8080816b8e967f016b8e995f5103b5
+Provides Management: No
+Available:           10
+Suggested:           1
+Service Type:        Level 3
+Roles:
+Service Level:       Premium
+Usage:
+Add-ons:
+Subscription Type:   Stackable
+Starts:              11.7.2019
+Ends:                10.7.2020
+Entitlement Type:    Physical
+''', '')
+                    ]
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99632804a6',
+                        '--quantity', '2'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                ),
+                (
+                    [
+                        '/testbin/subscription-manager',
+                        'attach',
+                        '--pool', 'ff8080816b8e967f016b8e99747107e9',
+                        '--quantity', '4'
+                    ],
+                    {'check_rc': True},
+                    (0, '', '')
+                )
+            ],
+            'changed': True,
+        }
+    ],
+]
 
-        result = self.module_main(AnsibleExitJson)
 
-        self.assertFalse(result['changed'])
-        self.module_main_command.assert_has_calls([
-            call(['/testbin/subscription-manager', 'identity'], check_rc=False),
-        ])
+TEST_CASES_IDS = [item[1]['id'] for item in TEST_CASES]
 
-    def test_registeration_of_system(self):
-        """
-        Test registration using username and password
-        """
-        set_module_args(
-            {
-                'state': 'present',
-                'server_hostname': 'subscription.rhsm.redhat.com',
-                'username': 'admin',
-                'password': 'admin',
-                'org_id': 'admin'
-            })
-        self.module_main_command.side_effect = [
-            # First call: "identity" returns 1. It means that system is not registered.
-            (1, 'This system is not yet registered.', ''),
-            # Second call: "config" server hostname
-            (0, '', ''),
-            # Third call: "register"
-            (0, '', ''),
-        ]
 
-        result = self.module_main(AnsibleExitJson)
+@pytest.mark.parametrize('patch_ansible_module, testcase', TEST_CASES, ids=TEST_CASES_IDS, indirect=['patch_ansible_module'])
+@pytest.mark.usefixtures('patch_ansible_module')
+def test_redhat_subscribtion(mocker, capfd, patch_redhat_subscription, testcase):
+    """
+    Run unit tests for test cases listen in TEST_CASES
+    """
 
-        self.assertTrue(result['changed'])
-        self.module_main_command.assert_has_calls([
-            call(
-                [
-                    '/testbin/subscription-manager',
-                    'identity'
-                ],check_rc=False),
-            call(
-                [
-                    '/testbin/subscription-manager',
-                    'config',
-                    '--server.hostname=subscription.rhsm.redhat.com'
-                ], check_rc=True),
-            call(
-                [
-                    '/testbin/subscription-manager',
-                    'register',
-                    '--serverurl', 'subscription.rhsm.redhat.com',
-                    '--org', 'admin',
-                    '--username', 'admin',
-                    '--password', 'admin'
-                ], check_rc=True, expand_user_and_vars=False)
-        ])
+    # Mock function used for running commands first
+    call_results = [item[2] for item in testcase['run_command.calls']]
+    mock_run_command = mocker.patch.object(
+        basic.AnsibleModule,
+        'run_command',
+        side_effect=call_results)
 
+    # Try to run test case
+    with pytest.raises(SystemExit):
+        redhat_subscription.main()
+
+    out, err = capfd.readouterr()
+    results = json.loads(out)
+
+    assert 'changed' in results
+    assert results['changed'] == testcase['changed']
+    if 'msg' in results:
+        assert results['msg'] == testcase['msg']
+
+    assert basic.AnsibleModule.run_command.call_count == len(testcase['run_command.calls'])
+    if basic.AnsibleModule.run_command.call_count:
+        call_args_list = [(item[0][0], item[1]) for item in basic.AnsibleModule.run_command.call_args_list]
+        expected_call_args_list = [(item[0], item[1]) for item in testcase['run_command.calls']]
+        assert call_args_list == expected_call_args_list
