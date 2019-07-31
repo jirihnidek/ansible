@@ -696,7 +696,7 @@ class SysPurpose(object):
             elif key == 'sync':
                 pass
             else:
-                raise KeyError("Atribute: %s not in list of allowed attributes: %s" % 
+                raise KeyError("Atribute: %s not in list of allowed attributes: %s" %
                     (key, self.ALLOWED_ATTRIBUTES))
         current_syspurpose = self._read_syspurpose()
         if current_syspurpose != syspurpose:
